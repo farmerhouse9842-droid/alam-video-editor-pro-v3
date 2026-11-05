@@ -24,24 +24,87 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Generate Android Project
+      - name: Backup Native Android Files
         run: |
-          flutter create --platforms=android \
-            --org com.alam \
-            --project-name alam_video_editor_pro .
+          mkdir -p /tmp/alam_native
 
-      - name: Restore Custom MainActivity
-        run: |
-          mkdir -p android/app/src/main/kotlin/com/alam/videoeditor
+          NATIVE="android/app/src/main/kotlin/com/alam/videoeditor/MainActivity.kt"
 
-          if [ -f android/app/src/main/kotlin/com/alam/videoeditor/MainActivity.kt ]; then
-            sed -i 's/android:name=".MainActivity"/android:name="com.alam.videoeditor.MainActivity"/' android/app/src/main/AndroidManifest.xml
-          else
-            echo "ERROR: Custom MainActivity.kt missing!"
+          if [ ! -f "$NATIVE" ]; then
+            echo "ERROR: MainActivity.kt not found"
             exit 1
           fi
 
-      - name: Install Dependencies
+          cp "$NATIVE" /tmp/alam_native/MainActivity.kt
+
+      - name: Generate Clean Android Project
+        run: |
+          rm -rf android
+
+          flutter create \
+            --platforms=android \
+            --org com.alam \
+            --project-name alam_video_editor_pro \
+            .
+
+      - name: Restore Native Video Editor
+        run: |
+          mkdir -p android/app/src/main/kotlin/com/alam/videoeditor
+
+          cp /tmp/alam_native/MainActivity.kt \
+            android/app/src/main/kotlin/com/alam/videoeditor/MainActivity.kt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          text = text.replace(
+              'android:name=".MainActivity"',
+              'android:name="com.alam.videoeditor.MainActivity"'
+          )
+          manifest.write_text(text)
+          PY
+
+      - name: Enable Core Library Desugaring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle.kts")
+          text = path.read_text()
+
+          if "isCoreLibraryDesugaringEnabled" not in text:
+              text = text.replace(
+                  "compileOptions {",
+                  "compileOptions {\n"
+                  "        isCoreLibraryDesugaringEnabled = true",
+                  1
+              )
+
+          dependency = (
+              'coreLibraryDesugaring('
+              '"com.android.tools:desugar_jdk_libs:2.1.4")'
+          )
+
+          if dependency not in text:
+              if "dependencies {" in text:
+                  text = text.replace(
+                      "dependencies {",
+                      "dependencies {\n    " + dependency,
+                      1
+                  )
+              else:
+                  text += (
+                      "\ndependencies {\n"
+                      "    " + dependency + "\n"
+                      "}\n"
+                  )
+
+          path.write_text(text)
+          PY
+
+      - name: Install Flutter Dependencies
         run: flutter pub get
 
       - name: Generate App Icon
@@ -49,10 +112,11 @@ jobs:
           if [ -f assets/icon/app_icon.png ]; then
             dart run flutter_launcher_icons
           else
-            echo "App icon not found; skipping icon generation"
+            echo "ERROR: App icon missing"
+            exit 1
           fi
 
-      - name: Build APK
+      - name: Build Release APK
         run: flutter build apk --release
 
       - name: Upload APK
