@@ -1,18 +1,22 @@
 
 name: Build Alam Video Editor Pro V3
 
-on:
+'on':
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -25,20 +29,24 @@ jobs:
           cache: true
 
       - name: Backup Native Android Files
+        shell: bash
         run: |
+          set -e
           mkdir -p /tmp/alam_native
 
           NATIVE="android/app/src/main/kotlin/com/alam/videoeditor/MainActivity.kt"
 
           if [ ! -f "$NATIVE" ]; then
-            echo "ERROR: MainActivity.kt not found"
+            echo "ERROR: MainActivity.kt missing"
             exit 1
           fi
 
           cp "$NATIVE" /tmp/alam_native/MainActivity.kt
 
       - name: Generate Clean Android Project
+        shell: bash
         run: |
+          set -e
           rm -rf android
 
           flutter create \
@@ -48,7 +56,10 @@ jobs:
             .
 
       - name: Restore Native Video Editor
+        shell: bash
         run: |
+          set -e
+
           mkdir -p android/app/src/main/kotlin/com/alam/videoeditor
 
           cp /tmp/alam_native/MainActivity.kt \
@@ -57,30 +68,72 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
           text = manifest.read_text()
+
           text = text.replace(
               'android:name=".MainActivity"',
               'android:name="com.alam.videoeditor.MainActivity"'
           )
+
           manifest.write_text(text)
           PY
 
-      - name: Enable Core Library Desugaring
+      - name: Setup Android SDK 36
+        shell: bash
         run: |
+          set -e
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          "$SDKMANAGER" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Fix Android Gradle Configuration
+        shell: bash
+        run: |
+          set -e
+
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("android/app/build.gradle.kts")
+
+          if not path.exists():
+              raise SystemExit("build.gradle.kts not found")
+
           text = path.read_text()
 
-          if "isCoreLibraryDesugaringEnabled" not in text:
-              text = text.replace(
-                  "compileOptions {",
-                  "compileOptions {\n"
-                  "        isCoreLibraryDesugaringEnabled = true",
-                  1
+          text, count = re.subn(
+              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+              'compileSdk = 36',
+              text,
+              count=1
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  "Could not configure compileSdk"
               )
+
+          if "isCoreLibraryDesugaringEnabled" not in text:
+              text, count = re.subn(
+                  r'compileOptions\s*\{',
+                  'compileOptions {\n'
+                  '        isCoreLibraryDesugaringEnabled = true',
+                  text,
+                  count=1
+              )
+
+              if count != 1:
+                  raise SystemExit(
+                      "compileOptions block not found"
+                  )
 
           dependency = (
               'coreLibraryDesugaring('
@@ -102,19 +155,26 @@ jobs:
                   )
 
           path.write_text(text)
+          print("Android SDK 36 and desugaring configured")
           PY
 
       - name: Install Flutter Dependencies
         run: flutter pub get
 
       - name: Generate App Icon
+        shell: bash
         run: |
-          if [ -f assets/icon/app_icon.png ]; then
-            dart run flutter_launcher_icons
-          else
-            echo "ERROR: App icon missing"
+          set -e
+
+          if [ ! -f assets/icon/app_icon.png ]; then
+            echo "ERROR: assets/icon/app_icon.png missing"
             exit 1
           fi
+
+          dart run flutter_launcher_icons
+
+      - name: Flutter Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build Release APK
         run: flutter build apk --release
@@ -129,7 +189,7 @@ jobs:
       - name: Build Test AAB
         run: flutter build appbundle --release
 
-      - name: Upload AAB
+      - name: Upload Test AAB
         uses: actions/upload-artifact@v4
         with:
           name: Alam-Video-Editor-Pro-V3-Test-AAB
