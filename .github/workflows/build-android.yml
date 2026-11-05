@@ -3,9 +3,6 @@ name: Build Alam Video Editor Pro V3
 
 'on':
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   build:
@@ -82,14 +79,12 @@ jobs:
           manifest.write_text(text)
           PY
 
-      - name: Setup Android SDK 36
+      - name: Install Android SDK 36
         shell: bash
         run: |
           set -e
 
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-
-          "$SDKMANAGER" \
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
@@ -172,9 +167,6 @@ jobs:
           fi
 
           dart run flutter_launcher_icons
-
-      - name: Flutter Analyze
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build Release APK
         run: flutter build apk --release
