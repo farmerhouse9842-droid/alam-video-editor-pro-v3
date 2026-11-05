@@ -7,7 +7,7 @@ name: Build Alam Video Editor Pro V3
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout Repository
@@ -25,132 +25,92 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Backup Native Android Files
+      - name: Backup Kotlin MainActivity
         shell: bash
         run: |
           set -e
-          mkdir -p /tmp/alam_native
-
           NATIVE="android/app/src/main/kotlin/com/alam/videoeditor/MainActivity.kt"
-
-          if [ ! -f "$NATIVE" ]; then
-            echo "ERROR: MainActivity.kt missing"
+          test -f "$NATIVE" || {
+            echo "MainActivity.kt missing"
             exit 1
-          fi
-
-          cp "$NATIVE" /tmp/alam_native/MainActivity.kt
+          }
+          cp "$NATIVE" /tmp/AlamMainActivity.kt
 
       - name: Generate Clean Android Project
         shell: bash
         run: |
           set -e
           rm -rf android
-
-          flutter create \
-            --platforms=android \
+          flutter create --platforms=android \
             --org com.alam \
-            --project-name alam_video_editor_pro \
-            .
+            --project-name alam_video_editor_pro .
 
       - name: Restore Native Video Editor
         shell: bash
         run: |
           set -e
-
           mkdir -p android/app/src/main/kotlin/com/alam/videoeditor
-
-          cp /tmp/alam_native/MainActivity.kt \
+          cp /tmp/AlamMainActivity.kt \
             android/app/src/main/kotlin/com/alam/videoeditor/MainActivity.kt
 
           python3 - <<'PY'
           from pathlib import Path
-
-          manifest = Path(
-              "android/app/src/main/AndroidManifest.xml"
-          )
-
-          text = manifest.read_text()
-
-          text = text.replace(
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          s = s.replace(
               'android:name=".MainActivity"',
               'android:name="com.alam.videoeditor.MainActivity"'
           )
-
-          manifest.write_text(text)
+          p.write_text(s)
           PY
 
       - name: Install Android SDK 36
         shell: bash
         run: |
           set -e
-
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Fix Android Gradle Configuration
+      - name: Configure Android SDK and Desugaring
         shell: bash
         run: |
           set -e
-
           python3 - <<'PY'
           from pathlib import Path
           import re
 
-          path = Path("android/app/build.gradle.kts")
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
 
-          if not path.exists():
-              raise SystemExit("build.gradle.kts not found")
-
-          text = path.read_text()
-
-          text, count = re.subn(
-              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+          s, n = re.subn(
+              r'compileSdk\s*=\s*[^\n]+',
               'compileSdk = 36',
-              text,
+              s,
               count=1
           )
+          if n != 1:
+              raise SystemExit("compileSdk setting missing")
 
-          if count != 1:
-              raise SystemExit(
-                  "Could not configure compileSdk"
-              )
-
-          if "isCoreLibraryDesugaringEnabled" not in text:
-              text, count = re.subn(
+          if "isCoreLibraryDesugaringEnabled" not in s:
+              s, n = re.subn(
                   r'compileOptions\s*\{',
                   'compileOptions {\n'
                   '        isCoreLibraryDesugaringEnabled = true',
-                  text,
+                  s,
                   count=1
               )
+              if n != 1:
+                  raise SystemExit("compileOptions missing")
 
-              if count != 1:
-                  raise SystemExit(
-                      "compileOptions block not found"
-                  )
-
-          dependency = (
+          dep = (
               'coreLibraryDesugaring('
               '"com.android.tools:desugar_jdk_libs:2.1.4")'
           )
+          if dep not in s:
+              s += "\ndependencies {\n    " + dep + "\n}\n"
 
-          if dependency not in text:
-              if "dependencies {" in text:
-                  text = text.replace(
-                      "dependencies {",
-                      "dependencies {\n    " + dependency,
-                      1
-                  )
-              else:
-                  text += (
-                      "\ndependencies {\n"
-                      "    " + dependency + "\n"
-                      "}\n"
-                  )
-
-          path.write_text(text)
-          print("Android SDK 36 and desugaring configured")
+          p.write_text(s)
           PY
 
       - name: Install Flutter Dependencies
@@ -160,13 +120,37 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          if [ ! -f assets/icon/app_icon.png ]; then
-            echo "ERROR: assets/icon/app_icon.png missing"
-            exit 1
-          fi
-
+          test -f assets/icon/app_icon.png
           dart run flutter_launcher_icons
+
+      - name: Verify Compile SDK Before Build
+        shell: bash
+        run: |
+          set -e
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+
+          s, n = re.subn(
+              r'compileSdk\s*=\s*[^\n]+',
+              'compileSdk = 36',
+              s,
+              count=1
+          )
+          if n != 1:
+              raise SystemExit("compileSdk not found")
+
+          p.write_text(s)
+          print("Final compileSdk configuration:")
+          for line in s.splitlines():
+              if "compileSdk =" in line:
+                  print(line.strip())
+          PY
+
+          grep -n "compileSdk" android/app/build.gradle.kts
 
       - name: Build Release APK
         run: flutter build apk --release
