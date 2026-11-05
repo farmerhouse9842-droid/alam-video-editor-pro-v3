@@ -1,0 +1,73 @@
+
+name: Build Alam Video Editor Pro V3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android Project
+        run: |
+          flutter create --platforms=android \
+            --org com.alam \
+            --project-name alam_video_editor_pro .
+
+      - name: Restore Custom MainActivity
+        run: |
+          mkdir -p android/app/src/main/kotlin/com/alam/videoeditor
+
+          if [ -f android/app/src/main/kotlin/com/alam/videoeditor/MainActivity.kt ]; then
+            sed -i 's/android:name=".MainActivity"/android:name="com.alam.videoeditor.MainActivity"/' android/app/src/main/AndroidManifest.xml
+          else
+            echo "ERROR: Custom MainActivity.kt missing!"
+            exit 1
+          fi
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Generate App Icon
+        run: |
+          if [ -f assets/icon/app_icon.png ]; then
+            dart run flutter_launcher_icons
+          else
+            echo "App icon not found; skipping icon generation"
+          fi
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Alam-Video-Editor-Pro-V3-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Build Test AAB
+        run: flutter build appbundle --release
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: Alam-Video-Editor-Pro-V3-Test-AAB
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
