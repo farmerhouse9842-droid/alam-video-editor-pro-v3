@@ -1,0 +1,25 @@
+name: alam_video_editor_pro
+description: Alam Video Editor Pro V3
+publish_to: none
+version: 3.0.0+3
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  video_player: ^2.9.2
+  image_picker: ^1.1.2
+  path_provider: ^2.1.5
+  path: ^1.9.0
+  share_plus: ^10.1.4
+  file_picker: ^8.1.7
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.4
+flutter:
+  uses-material-design: true
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/icon/app_icon.png
